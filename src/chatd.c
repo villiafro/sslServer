@@ -16,8 +16,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 #include <glib.h>
+#include <string.h>
+#include <ctype.h>
+#include <dirent.h>
 
 
 /* This can be used to build instances of GTree that index on
@@ -56,18 +60,49 @@ gint fd_cmp(gconstpointer fd1,  gconstpointer fd2, gpointer G_GNUC_UNUSED data)
 
 int main(int argc, char **argv)
 {
-     struct sockaddr_in server, client;
+    SSL_library_init();
+    SSL_load_error_strings();
+    SSL_CTX *ssl_ctx = SSL_CTX_new(TLSv1_server_method());
+
+    const int server_port = strtol(argv[1], NULL, 10);
+
+    int err,sock;
+
+    struct sockaddr_in server, client;
+
+    int listen_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    //CHK_ERR(listen_sock, "socket");
+
+     memset(&server, 0, sizeof(server));
+     server.sin_family      = AF_INET;
+     server.sin_addr.s_addr = INADDR_ANY;
+     server.sin_port        = htons(server_port);      /* Server Port number */
+     
+     err = bind(listen_sock, (struct sockaddr*)&server,sizeof(server));
+     //CHK_ERR(err, "bind");
+     
+     /* Receive a TCP connection. */
+     err = listen(listen_sock, 5);
+     //CHK_ERR(err, "listen");
+
+    
+      //BIO_printf(bio_c_out, "Connection from %lx, port %x\n", 
+      //sa_cli.sin_addr.s_addr, sa_cli.sin_port);
 
      if (argc != 2) {
           fprintf(stderr, "Usage: %s <port>\n", argv[0]);
           exit(EXIT_FAILURE);
      }
 
-     const int server_port = strtol(argv[1], NULL, 10);
+     
 
      /* Initialize OpenSSL */
-
-     /* Receive and handle messages. */
+     for(;;){
+           /* Receive and handle messages. */
+        socklen_t len = (socklen_t) sizeof(client);
+        sock = accept(listen_sock, (struct sockaddr*)&client, &len);
+        printf("Socket accepted \n");
+     }
 
      exit(EXIT_SUCCESS);
 }
