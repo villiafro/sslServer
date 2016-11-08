@@ -25,6 +25,10 @@
 #include <ctype.h>
 #include <dirent.h>
 
+#include <time.h>
+#include <glib.h>
+#include <glib/gprintf.h>
+
 
 /* This can be used to build instances of GTree that index on
    the address of a connection. */
@@ -122,11 +126,19 @@ int main(int argc, char **argv)
     sock = accept(listen_sock, (struct sockaddr*)&client, &len);
     /* Initialize OpenSSL */
     server_ssl = SSL_new(ssl_ctx);
+
+    /* Get current date */
+    time_t mytime;
+    time(&mytime);  
+ 
+    char *ip_addr = inet_ntoa(client.sin_addr);
+    int *port_addr = ntohs(client.sin_port);
     
 
     if(server_ssl){
       SSL_set_fd(server_ssl, sock);
       err = SSL_accept(server_ssl);
+      printf("%s : <%s>:<%d> connected\n",g_strstrip(ctime(&mytime)), ip_addr, port_addr);
 
       err = SSL_write(server_ssl, "Server: Welcome!", 16);
     }

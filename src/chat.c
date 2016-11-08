@@ -325,7 +325,7 @@ int main(int argc, char **argv)
         FD_SET(STDIN_FILENO, &rfds);
         FD_SET(exitfd[0], &rfds);
         FD_SET(sock,&rfds);
-        timeout.tv_sec = 5;
+        timeout.tv_sec = 10;
         timeout.tv_usec = 0;
 
         //int r = select(exitfd[0] + 1, &rfds, NULL, NULL, &timeout);
