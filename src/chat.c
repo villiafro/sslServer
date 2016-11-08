@@ -6,6 +6,8 @@
  * select on how to do this (Hint: Iterate with FD_ISSET()).
  */
 
+//CLIENT
+
 #include <assert.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -255,116 +257,80 @@ int main(int argc, char **argv)
         /* Initialize OpenSSL */
     SSL_library_init();
     SSL_load_error_strings();
-    SSL_CTX *ssl_ctx = SSL_CTX_new(TLSv1_client_method());
-
+    SSL_METHOD *meth;
+    SSL_CTX *ssl_ctx;
     int err,sock;
+    struct sockaddr_in server_addr;
+    const char *s_ipaddr = "127.0.0.1";
     const int server_port = strtol(argv[1], NULL, 10);
 
-	/* TODO:
-	 * We may want to use a certificate file if we self sign the
-	 * certificates using SSL_use_certificate_file(). If available,
-	 * a private key can be loaded using
-	 * SSL_CTX_use_PrivateKey_file(). The use of private keys with
-	 * a server side key data base can be used to authenticate the
-	 * client.
-	 */
+    
+    meth = TLSv1_client_method();
+    ssl_ctx = SSL_CTX_new(meth);
 
-server_ssl = SSL_new(ssl_ctx);
-
-	/* Create and set up a listening socket. The sockets you
-	 * create here can be used in select calls, so do not forget
-	 * them.
-	 */
-sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-//CHK_ERR(sock, "socket");
-	/* Use the socket for the SSL connection. */
-SSL_set_fd(server_ssl, server_fd);
-
-	/* Now we can create BIOs and use them instead of the socket.
-	 * The BIO is responsible for maintaining the state of the
-	 * encrypted connection and the actual encryption. Reads and
-	 * writes to sock_fd will insert unencrypted data into the
-	 * stream, which even may crash the server.
-	 */
-
-        /* Set up secure connection to the chatd server. */
-
-struct sockaddr_in server_addr;
-
-memset (&server_addr, '\0', sizeof(server_addr));
- server_addr.sin_family      = AF_INET;
- server_addr.sin_port        = htons(server_port); /* Server Port number */
- inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);
- //server_addr.sin_addr.s_addr = inet_addr(s_ipaddr); /* Server IP */
- 
- err = connect(sock, (struct sockaddr*) &server_addr, sizeof(server_addr));
- //CHK_ERR(err, "connect");
-
-        /* Read characters from the keyboard while waiting for input.
-         */
-prompt = strdup("> ");
-rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
-for (;;) {
-    fd_set rfds;
-    struct timeval timeout;
-
-                /* You must change this. Keep exitfd[0] in the read set to
-                   receive the message from the signal handler. Otherwise,
-                   the chat client can break in terrible ways. */
-    FD_ZERO(&rfds);
-    FD_SET(STDIN_FILENO, &rfds);
-    FD_SET(exitfd[0], &rfds);
-    timeout.tv_sec = 5;
-    timeout.tv_usec = 0;
-
-    int r = select(exitfd[0] + 1, &rfds, NULL, NULL, &timeout);
-    if (r < 0) {
-        if (errno == EINTR) {
-                                /* This should either retry the call or
-                                   exit the loop, depending on whether we
-                                   received a SIGTERM. */
-            continue;
-        }
-                        /* Not interrupted, maybe nothing we can do? */
-        perror("select()");
-        break;
-    }
-    if (r == 0) {
-        write(STDOUT_FILENO, "No message?\n", 12);
-        fsync(STDOUT_FILENO);
-                        /* Whenever you print out a message, call this
-                           to reprint the current input line. */
-        rl_redisplay();
-        continue;
-    }
-    if (FD_ISSET(exitfd[0], &rfds)) {
-                        /* We received a signal. */
-        int signum;
-        for (;;) {
-            if (read(exitfd[0], &signum, sizeof(signum)) == -1) {
-                if (errno = EAGAIN) {
-                    break;
-                } else {
-                    perror("read()");
-                    exit(EXIT_FAILURE);
-                }
-            }
-        }
-        if (signum == SIGINT) {
-                                /* Don't do anything. */
-        } else if (signum == SIGTERM) {
-                                /* Clean-up and exit. */
-            break;
-        }
-
-    }
-    if (FD_ISSET(STDIN_FILENO, &rfds)) {
-        rl_callback_read_char();
+    const char* certificate;
+    certificate = "clientkey.crt";
+    if(SSL_CTX_use_certificate_file(ssl_ctx,certificate, SSL_FILETYPE_PEM) <= 0){
+            printf("error loading certificate \n");
+            exit(1);
     }
 
-                /* Handle messages from the server here! */
-}
+    const char* privatekey;
+    privatekey = "client.key";
+    if (SSL_CTX_use_PrivateKey_file(ssl_ctx, privatekey, SSL_FILETYPE_PEM) <= 0){
+        printf("error loading private key \n");
+        exit(1);
+    }
 
-        /* replace by code to shutdown the connection and exit
-           the program. */
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    memset (&server_addr, '\0', sizeof(server_addr));
+    server_addr.sin_family      = AF_INET;
+    server_addr.sin_port        = htons(server_port); /* Server Port number */
+    server_addr.sin_addr.s_addr = inet_addr(s_ipaddr); 
+
+    err = connect(sock, (struct sockaddr*) &server_addr, sizeof(server_addr));
+
+    /* Use the socket for the SSL connection. */
+    server_ssl = SSL_new(ssl_ctx);
+    SSL_set_fd(server_ssl, sock);
+
+    err = SSL_connect(server_ssl);
+    if(err != 1){
+        printf("error connecting on SSL \n");
+    }
+    
+    char    hello[80];
+    char buf [4096];
+     
+    for(;;){
+        printf ("Message to be sent to the SSL server: ");
+        fgets (hello, 80, stdin);
+        err = SSL_write(server_ssl, hello, strlen(hello));
+
+        err = SSL_read(server_ssl, buf, sizeof(buf)-1);
+        buf[err] = '\0';
+        printf ("Received %d chars:'%s'\n", err, buf); 
+    }
+
+    	/* Now we can create BIOs and use them instead of the socket.
+    	 * The BIO is responsible for maintaining the state of the
+    	 * encrypted connection and the actual encryption. Reads and
+    	 * writes to sock_fd will insert unencrypted data into the
+    	 * stream, which even may crash the server.
+    	 */
+
+            /* Set up secure connection to the chatd server. */
+
+
+    /* Read characters from the keyboard while waiting for input.*/
+
+    //prompt = strdup("> ");
+    //rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
+
+
+    err = SSL_shutdown(server_ssl);
+    err = close(sock);
+    SSL_free(server_ssl);
+    SSL_CTX_free(ssl_ctx);
 }

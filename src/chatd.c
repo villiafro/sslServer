@@ -6,6 +6,8 @@
  * select on how to do this (Hint: Iterate with FD_ISSET()).
  */
 
+//SERVER
+
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -59,50 +61,81 @@ gint fd_cmp(gconstpointer fd1,  gconstpointer fd2, gpointer G_GNUC_UNUSED data)
 
 
 int main(int argc, char **argv)
-{
-    SSL_library_init();
-    SSL_load_error_strings();
-    SSL_CTX *ssl_ctx = SSL_CTX_new(TLSv1_server_method());
+{ 
+  const int server_port = strtol(argv[1], NULL, 10);
+  int err,sock;
+  struct sockaddr_in server, client;
+  socklen_t len;
+  int listen_sock;
+  SSL_METHOD *meth;
+  SSL_CTX *ssl_ctx;
+  static SSL *server_ssl;
+  SSL_library_init();
+  SSL_load_error_strings();
 
-    const int server_port = strtol(argv[1], NULL, 10);
+  meth = TLSv1_server_method();
+  ssl_ctx = SSL_CTX_new(meth);
+  
+  const char* certificate;
+  certificate = "fd.crt";  
+  if(SSL_CTX_use_certificate_file(ssl_ctx, certificate, SSL_FILETYPE_PEM) <= 0){
+      //ERR_print_errors(bio_err);
+      printf("error loading certificate \n");
+      exit(1);
+  }
 
-    int err,sock;
+  const char* privatekey;
+  privatekey = "fd.key";
+  if (SSL_CTX_use_PrivateKey_file(ssl_ctx, privatekey, SSL_FILETYPE_PEM) <= 0){
+      printf("error loading private key \n");
+      exit(1);
+  }
 
-    struct sockaddr_in server, client;
-
-    int listen_sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+  listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);  
     //CHK_ERR(listen_sock, "socket");
 
-     memset(&server, 0, sizeof(server));
-     server.sin_family      = AF_INET;
-     server.sin_addr.s_addr = INADDR_ANY;
-     server.sin_port        = htons(server_port);      /* Server Port number */
+  memset(&server, 0, sizeof(server));
+  server.sin_family      = AF_INET;
+  server.sin_addr.s_addr = INADDR_ANY;
+  server.sin_port        = htons(server_port);      /* Server Port number */
      
-     err = bind(listen_sock, (struct sockaddr*)&server,sizeof(server));
-     //CHK_ERR(err, "bind");
+  err = bind(listen_sock, (struct sockaddr*)&server,sizeof(server));
      
-     /* Receive a TCP connection. */
-     err = listen(listen_sock, 5);
-     //CHK_ERR(err, "listen");
+  /* Receive a TCP connection. */
+  err = listen(listen_sock, 5);
+  //CHK_ERR(err, "listen");
 
     
       //BIO_printf(bio_c_out, "Connection from %lx, port %x\n", 
       //sa_cli.sin_addr.s_addr, sa_cli.sin_port);
 
-     if (argc != 2) {
-          fprintf(stderr, "Usage: %s <port>\n", argv[0]);
-          exit(EXIT_FAILURE);
-     }
+  if (argc != 2) {
+      fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+      exit(EXIT_FAILURE);
+  }
 
-     
+  len = (socklen_t) sizeof(client);
+  sock = accept(listen_sock, (struct sockaddr*)&client, &len);
+  /* Initialize OpenSSL */
+  server_ssl = SSL_new(ssl_ctx);
+  SSL_set_fd(server_ssl, sock);
+  err = SSL_accept(server_ssl);
 
-     /* Initialize OpenSSL */
-     for(;;){
-           /* Receive and handle messages. */
-        socklen_t len = (socklen_t) sizeof(client);
-        sock = accept(listen_sock, (struct sockaddr*)&client, &len);
-        printf("Socket accepted \n");
-     }
+  char buf[4096];
+  
 
-     exit(EXIT_SUCCESS);
+
+  for(;;){
+    err = SSL_read(server_ssl, buf, sizeof(buf) - 1);
+    buf[err] = '\0';
+    printf ("Received %d chars:'%s'\n", err, buf);
+    err = SSL_write(server_ssl, "This message is from the SSL server", strlen("This message is from the SSL server"));
+  }
+
+  err = SSL_shutdown(server_ssl);
+  err = close(sock);
+  SSL_free(server_ssl);
+  SSL_CTX_free(ssl_ctx);
+  
+  exit(EXIT_SUCCESS);
 }
