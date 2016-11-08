@@ -114,22 +114,23 @@ int main(int argc, char **argv)
       exit(EXIT_FAILURE);
   }
 
-  len = (socklen_t) sizeof(client);
-  sock = accept(listen_sock, (struct sockaddr*)&client, &len);
-  /* Initialize OpenSSL */
-  server_ssl = SSL_new(ssl_ctx);
-  SSL_set_fd(server_ssl, sock);
-  err = SSL_accept(server_ssl);
-
   char buf[4096];
-  
 
 
   for(;;){
-    err = SSL_read(server_ssl, buf, sizeof(buf) - 1);
-    buf[err] = '\0';
-    printf ("Received %d chars:'%s'\n", err, buf);
-    err = SSL_write(server_ssl, "This message is from the SSL server", strlen("This message is from the SSL server"));
+    len = (socklen_t) sizeof(client);
+    sock = accept(listen_sock, (struct sockaddr*)&client, &len);
+    /* Initialize OpenSSL */
+    server_ssl = SSL_new(ssl_ctx);
+    
+
+    if(server_ssl){
+      SSL_set_fd(server_ssl, sock);
+      err = SSL_accept(server_ssl);
+
+      err = SSL_write(server_ssl, "Server: Welcome!", 16);
+    }
+    
   }
 
   err = SSL_shutdown(server_ssl);

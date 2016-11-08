@@ -131,9 +131,13 @@ static char *prompt;
    gets called to handle the entered line. Implement the code to
    handle the user requests in this function. The client handles the
    server messages in the loop in main(). */
+
 void readline_callback(char *line)
 {
+    int err;
+    char hello[80];
     char buffer[256];
+
     if (NULL == line) {
         rl_callback_handler_remove();
         signal_handler(SIGTERM);
@@ -188,6 +192,14 @@ if (strncmp("/list", line, 5) == 0) {
 }
 if (strncmp("/roll", line, 5) == 0) {
                 /* roll dice and declare winner. */
+    int i = 5;
+    int j = i+1;
+    while(line[j] != '\0'){
+        j++;
+    }
+    char *message = strndup(&(line[i]), j - i);
+    //snprintf(buffer, 255, "%s\n", line);
+    err = SSL_write(server_ssl, message, strlen(message));
     return;
 }
 if (strncmp("/say", line, 4) == 0) {
@@ -195,8 +207,7 @@ if (strncmp("/say", line, 4) == 0) {
     int i = 4;
     while (line[i] != '\0' && isspace(line[i])) { i++; }
     if (line[i] == '\0') {
-        write(STDOUT_FILENO, "Usage: /say username message\n",
-          29);
+        write(STDOUT_FILENO, "Usage: /say username message\n",29);
         fsync(STDOUT_FILENO);
         rl_redisplay();
         return;
@@ -205,8 +216,7 @@ if (strncmp("/say", line, 4) == 0) {
     int j = i+1;
     while (line[j] != '\0' && isgraph(line[j])) { j++; }
     if (line[j] == '\0') {
-        write(STDOUT_FILENO, "Usage: /say username message\n",
-          29);
+        write(STDOUT_FILENO, "Usage: /say username message\n",29);
         fsync(STDOUT_FILENO);
         rl_redisplay();
         return;
@@ -263,6 +273,7 @@ int main(int argc, char **argv)
     struct sockaddr_in server_addr;
     const char *s_ipaddr = "127.0.0.1";
     const int server_port = strtol(argv[1], NULL, 10);
+    char buf [4096];
 
     
     meth = TLSv1_client_method();
@@ -299,18 +310,90 @@ int main(int argc, char **argv)
     if(err != 1){
         printf("error connecting on SSL \n");
     }
-    
-    char    hello[80];
-    char buf [4096];
-     
-    for(;;){
-        printf ("Message to be sent to the SSL server: ");
-        fgets (hello, 80, stdin);
-        err = SSL_write(server_ssl, hello, strlen(hello));
 
-        err = SSL_read(server_ssl, buf, sizeof(buf)-1);
-        buf[err] = '\0';
-        printf ("Received %d chars:'%s'\n", err, buf); 
+    prompt = strdup("> ");
+    rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
+     
+    for(;;){        
+        fd_set rfds;
+        struct timeval timeout;
+
+        /* You must change this. Keep exitfd[0] in the read set to
+        receive the message from the signal handler. Otherwise,
+        the chat client can break in terrible ways. */
+        FD_ZERO(&rfds);
+        FD_SET(STDIN_FILENO, &rfds);
+        FD_SET(exitfd[0], &rfds);
+        FD_SET(sock,&rfds);
+        timeout.tv_sec = 5;
+        timeout.tv_usec = 0;
+
+        //int r = select(exitfd[0] + 1, &rfds, NULL, NULL, &timeout);
+        int r = select(((sock > STDIN_FILENO) ? sock: STDIN_FILENO) + 1, &rfds, NULL, NULL, &timeout);
+        if (r < 0) {
+            if (errno == EINTR) {
+                                    /* This should either retry the call or
+                                       exit the loop, depending on whether we
+                                       received a SIGTERM. */
+                continue;
+            }
+                            /* Not interrupted, maybe nothing we can do? */
+            perror("select()");
+            break;
+        }
+        if (r == 0) {
+            write(STDOUT_FILENO, "No message?\n", 12);
+            fsync(STDOUT_FILENO);
+                            /* Whenever you print out a message, call this
+                               to reprint the current input line. */
+            rl_redisplay();
+            continue;
+        }
+        if (FD_ISSET(exitfd[0], &rfds)) {
+            printf ("revieved a signal \n");
+                            /* We received a signal. */
+            int signum;
+            for (;;) {
+                if (read(exitfd[0], &signum, sizeof(signum)) == -1) {
+                    if (errno = EAGAIN) {
+                        printf ("error EAGAIN \n");
+                        break;
+                    } else {
+                        perror("read()");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+
+            }
+            if (signum == SIGINT) {
+                                    /* Don't do anything. */
+            } else if (signum == SIGTERM) {
+                                    /* Clean-up and exit. */
+                break;
+            }
+
+        }
+        if (FD_ISSET(STDIN_FILENO, &rfds)) {
+            rl_callback_read_char();            
+        }
+        if(FD_ISSET(sock, &rfds)) {
+            int message_worked = SSL_read(server_ssl, buf, sizeof(buf) - 1);
+
+            if(message_worked == -1) {
+                printf("Error reading form server\n");
+            }
+
+            if(message_worked == 0) {
+                /* Connection terminated */
+                break;
+            }
+
+            buf[message_worked] = '\0';
+            write(STDOUT_FILENO, buf, strlen(buf));
+            write(STDOUT_FILENO, "\n", 1);
+            write(STDOUT_FILENO, prompt, strlen(prompt));
+            fsync(STDOUT_FILENO);
+        }
     }
 
     	/* Now we can create BIOs and use them instead of the socket.
