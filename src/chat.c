@@ -42,8 +42,7 @@ static int exitfd[2];
    library, otherwise the terminal is in a inconsistent state. The
    signal number is sent through a self pipe to notify the main loop
    of the received signal. This avoids a race condition in select. */
-void
-signal_handler(int signum)
+void signal_handler(int signum)
 {
     int _errno = errno;
     if (write(exitfd[1], &signum, sizeof(signum)) == -1 && errno != EAGAIN) {
@@ -109,6 +108,7 @@ static void initialize_exitfd(void)
  */
 static int server_fd;
 static SSL *server_ssl;
+
 static struct sockaddr_in server_addr;
 
 /* This variable shall point to the name of the user. The initial value
@@ -126,19 +126,18 @@ static char *chatroom;
  * chat room he is in as part of the prompt. */
 static char *prompt;
 int active = 1;
+int begin = 0;
 
-
-
-/* When a line is entered using the readline library, this function
-   gets called to handle the entered line. Implement the code to
-   handle the user requests in this function. The client handles the
-   server messages in the loop in main(). */
-
+//A function to send a message to the server using the server_ssl pipe
 void sendToServer(char *message){
     int server_message = SSL_write(server_ssl, message, strlen(message));
     if(server_message == -1) { printf("Error sending message to server\n"); }
 }
 
+/* When a line is entered using the readline library, this function
+   gets called to handle the entered line. Implement the code to
+   handle the user requests in this function. The client handles the
+   server messages in the loop in main(). */
 void readline_callback(char *line)
 {
     int err;
@@ -245,16 +244,20 @@ if (strncmp("/user", line, 5) == 0) {
         rl_redisplay();
         return;
     }
-    char *new_user = strdup(&(line[i]));
+    //char *new_user = strdup(&(line[i]));
     //char passwd[48];
     //getpasswd("Password: ", passwd, 48);
 
                 /* Process and send this information to the server. */
 
                 /* Maybe update the prompt. */
-    //free(prompt);
-    //prompt = NULL; /* What should the new prompt look like? */
-    //rl_set_prompt(prompt);
+    free(prompt);
+    //char newprompt[80];
+    //sprintf(newprompt, "%s > ", new_user);
+    //printf("newprompt %s\n", newprompt);
+    
+    prompt = strdup("*>"); /* What should the new prompt look like? */
+    rl_set_prompt(prompt);
     sendToServer(line);
     return;
 }
@@ -339,7 +342,7 @@ int main(int argc, char **argv)
 
     prompt = strdup("> ");
     rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
-     
+  
     while(active == 1){        
         fd_set rfds;
         struct timeval timeout;
@@ -399,6 +402,7 @@ int main(int argc, char **argv)
             }
 
         }*/
+
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             rl_callback_read_char();            
         }
@@ -418,8 +422,24 @@ int main(int argc, char **argv)
             buf[message_worked] = '\0';
             write(STDOUT_FILENO, buf, strlen(buf));
             write(STDOUT_FILENO, "\n", 1);
-            write(STDOUT_FILENO, prompt, strlen(prompt));
-            fsync(STDOUT_FILENO);
+            
+
+            if(begin == 0){
+                write(STDOUT_FILENO, "\n", 1);
+                printf("Please enter /user _username_ to begin\n");
+                printf("Enter /bye or /quit to exit the chat server at any time\n");
+                printf("To join a chatroom, enter /join _name of chatroom_\n");
+                printf("To get a list of chatrooms, enter /list\n");
+                printf("To get a list of users, enter /who\n");
+                printf("To send a private message, enter /say _name of recipient_ _message_\n");
+                printf("To send a public message to chatroom, enter _message_\n");
+                write(STDOUT_FILENO, prompt, strlen(prompt));
+                fsync(STDOUT_FILENO);
+                begin = 1;
+            }else{
+                write(STDOUT_FILENO, prompt, strlen(prompt));
+                fsync(STDOUT_FILENO);
+            }
         }
     }
 

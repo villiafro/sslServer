@@ -40,6 +40,12 @@ struct chatroom{
   char *name;
 }chatroom;
 
+struct privateMessage{
+  char *receiver;
+  char *message;
+  char *sender;
+}privateMessage;
+
 
 GTree *connections;
 GString *ListOfUsers;
@@ -119,9 +125,7 @@ void joinRoom(char *roomName, gpointer userinfo){
 
 void changeUserName(char *new_username, gpointer userinfo){
   struct user* current_user = (struct user*)userinfo;
-
   current_user->username = strdup(new_username);
-
   int err = SSL_write(current_user->ssl, "Username changed", 16);
 }
 
@@ -145,6 +149,25 @@ void logConnection(char *ip_addr, int *port_addr, int connecting){
 
 }
 
+gboolean checkAuthentication(char *username){
+  if(username == "Anonymous"){
+    return FALSE;
+  }
+  return TRUE;
+}
+
+gboolean sendPM(gpointer key, gpointer value, gpointer data){
+  struct user *receiver = (struct user *)value;
+  struct privateMessage *message = (struct privateMessage *)data;
+  char sender[100];
+  sprintf(sender, "%s : %s \n", message->sender, message->message);
+  if(strcmp(message->receiver, receiver->username) == 0) {
+    SSL_write(receiver->ssl, sender, strlen(sender));
+    return TRUE;
+  }
+  return FALSE;
+}
+
 gboolean readData(gpointer key, gpointer value, gpointer data){
   struct user *current_user = (struct user *) value;
   fd_set *current_set = (fd_set *) data;
@@ -161,28 +184,46 @@ gboolean readData(gpointer key, gpointer value, gpointer data){
       }
       else if(err > 0){
         if(strncmp("/who",buf,4) == 0){
-            buf[err] = "\0";
-            ListOfUsers = g_string_new("All Users:\n");
-            g_tree_foreach(connections,AddToUserList,current_set);
+            if(checkAuthentication(current_user->username)){
+              buf[err] = "\0";
+              ListOfUsers = g_string_new("All Users:\n");
+              g_tree_foreach(connections,AddToUserList,current_set);
 
-            SSL_write(current_user->ssl,ListOfUsers->str, strlen(ListOfUsers->str));
-            g_string_free(ListOfUsers,1);
+              SSL_write(current_user->ssl,ListOfUsers->str, strlen(ListOfUsers->str));
+              g_string_free(ListOfUsers,1);
+            }
+            else{
+              SSL_write(current_user->ssl, "Not authenticated, create a username\n", strlen("Not authenticated, create a username\n"));
+            }
+            
         }
         else if(strncmp("/list", buf, 5) == 0){
-          buf[err] = "\0";
-          ListOfChatrooms = g_string_new("All Chatrooms:\n");
-          g_tree_foreach(chatrooms,AddToChatroomList,NULL);
+          if(checkAuthentication(current_user->username)){
+            buf[err] = "\0";
+            ListOfChatrooms = g_string_new("All Chatrooms:\n");
+            g_tree_foreach(chatrooms,AddToChatroomList,NULL);
 
-          SSL_write(current_user->ssl,ListOfChatrooms->str,strlen(ListOfChatrooms->str));
-          g_string_free(ListOfChatrooms,1);
+            SSL_write(current_user->ssl,ListOfChatrooms->str,strlen(ListOfChatrooms->str));
+            g_string_free(ListOfChatrooms,1);
+          }
+          else{
+              SSL_write(current_user->ssl, "Not authenticated, create a username\n", strlen("Not authenticated, create a username\n"));
+            }
+          
         }
         else if(strncmp("/join",buf, 5) == 0){
-          int i = 5;
-          while (buf[i] != '\0' && isspace(buf[i])) { i++; }
-          char *chatroom = g_new0(char, strlen(buf) - 5);
-          strcpy(chatroom, buf+i);
+          if(checkAuthentication(current_user->username)){
+            int i = 5;
+            while (buf[i] != '\0' && isspace(buf[i])) { i++; }
+            char *chatroom = g_new0(char, strlen(buf) - 5);
+            strcpy(chatroom, buf+i);
 
-          joinRoom(chatroom, current_user);
+            joinRoom(chatroom, current_user);
+          }
+          else{
+              SSL_write(current_user->ssl, "Not authenticated, create a username\n", strlen("Not authenticated, create a username\n"));
+            }
+          
         }
         else if(strncmp("/bye", buf, 4) == 0){
           logConnection(current_user->ip_addr, current_user->port_addr,0);
@@ -191,17 +232,15 @@ gboolean readData(gpointer key, gpointer value, gpointer data){
         else if(strncmp("/say", buf, 4) == 0){
           int i = 4;
           while (buf[i] != '\0' && isspace(buf[i])) { i++; }
-
           int j = i+1;
           while (buf[j] != '\0' && isgraph(buf[j])) { j++; }
-
-          //char *receiver = strndup(&(line[i]), j - i - 1);
-          //char *message = strndup(&(line[j]), j - i - 1);
-
-          //char *receiver = g_new0(char, strlen(buf) - 4);
-          //strcpy(receiver, buf+i);
-
-          //sendPM();
+          char *receiver = strndup(&(buf[i]), j - i);
+          char *message = &buf[j+1];
+          struct privateMessage *sending_message = g_new0(struct privateMessage, 1);
+          sending_message->receiver = receiver;
+          sending_message->message = message;
+          sending_message->sender = current_user->username;
+          g_tree_foreach(connections, sendPM, sending_message);
         }
         else if(strncmp("/user", buf, 5) == 0){
           int i = 5;
@@ -213,9 +252,15 @@ gboolean readData(gpointer key, gpointer value, gpointer data){
         }
         else{
           //meaning a message to your room 
-          GSList *users_in_room = g_tree_lookup(chatrooms,current_user->chatroom);
-          g_slist_foreach(users_in_room, sentToChatroom, buf);
-
+          if(checkAuthentication(current_user->username)){
+            char message[500];
+            sprintf(message, "%s : %s\n", current_user->username, buf);
+            GSList *users_in_room = g_tree_lookup(chatrooms,current_user->chatroom);
+            g_slist_foreach(users_in_room, sentToChatroom, message);
+          }
+          else{
+              SSL_write(current_user->ssl, "Not authenticated, create a username\n", strlen("Not authenticated, create a username\n"));
+          }
         }
       }
       

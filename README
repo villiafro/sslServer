@@ -1,1 +1,16 @@
-Update this.
+Implementation comments:
+
+* We removed passphrase from keys because it is on a private computer
+
+* Client is automatically in public chat room when starting and has name anonymous
+
+* Instructions on how to use the chat server is provided when the user is connected to the server
+
+* All messages are sent over SSL so they are all encrypted and safe
+
+* Server has to be running for clients to be able to start the program
+
+* Users need to change their default username to be able to use all commands of the chat server, except /quit, /bye and /user
+
+* (3points) Logging of private messages: Should private messages be logged? If so, what should be logged about private messages? What are the consequences of your decisions?
+	- Private messages should not be logged, however the record of the message should be logged. This means that the content of the message is not logged because it's private but the record of the interaction of the users is logged.
