@@ -31,11 +31,15 @@
 
 struct user{
   char *username;
+  char *chatroom;
   SSL *ssl;
   int fd;
+  char *ip_addr;
+  int *port_addr;
 }user;
 
 struct chatroom{
+  GList *rooms;
   char *name;
 }chatroom;
 
@@ -89,10 +93,51 @@ static gint AddToUserList(gpointer key, gpointer uservalue, gpointer ret){
 }
 
 static gint AddToChatroomList(gpointer key, gpointer chatroomvalue, gpointer ret){
-  struct chatroom *chatroom_adding = (struct chatroom*)chatroomvalue;
-  ListOfChatrooms = g_string_append(ListOfChatrooms,chatroom_adding->name);
+  ListOfChatrooms = g_string_append(ListOfChatrooms,key);
   ListOfChatrooms = g_string_append(ListOfChatrooms,"\n");
   return 0;
+}
+
+void joinRoom(char *roomName, gpointer userinfo){
+  struct user* current_user = (struct user*)userinfo;
+
+  //removing from current room, if any
+  GSList *current_room = g_tree_lookup(chatrooms, current_user->chatroom);
+  current_room = g_slist_remove(current_room, current_user);
+  g_tree_insert(chatrooms,current_user->chatroom, current_room);
+  
+
+  //add user to room 
+  GSList *users_in_room = g_tree_lookup(chatrooms,roomName);
+  users_in_room = g_slist_prepend(users_in_room,current_user);
+  g_tree_insert(chatrooms,roomName,users_in_room);
+
+  current_user->chatroom = strdup(roomName);
+
+  //send a welcome message to the user
+  //char welcomeMessage[100];
+  //sprintf(welcomeMessage, "Welcome to %s \n", roomName);
+  int err = SSL_write(current_user->ssl, "Welcome to room", 15);
+}
+
+void sentToChatroom(gpointer key, gpointer data){
+  char *message = data;
+  struct user *recievingUser = (struct user *)key;
+  SSL_write(recievingUser->ssl, message, strlen(message));
+  return 0;
+}
+
+void logConnection(char *ip_addr, int *port_addr, int connecting){
+  /* Get current date */
+          time_t mytime;
+          time(&mytime); 
+  if(connecting == 1){
+      printf("%s : <%s>:<%d> connected\n",g_strstrip(ctime(&mytime)), ip_addr, port_addr);
+  }
+  else{
+      printf("%s : <%s>:<%d> disconnected\n",g_strstrip(ctime(&mytime)), ip_addr, port_addr);
+  }
+
 }
 
 gboolean readData(gpointer key, gpointer value, gpointer data){
@@ -106,22 +151,43 @@ gboolean readData(gpointer key, gpointer value, gpointer data){
       err = SSL_read(current_user->ssl, buf, sizeof(buf) - 1);
       if(err <= 0){
         //printf("disconnecting client");
+        logConnection(current_user->ip_addr, current_user->port_addr,0);
         //add timetampt disconnect
       }
       else if(err > 0){
         if(strncmp("/who",buf,4) == 0){
+            buf[err] = "\0";
             ListOfUsers = g_string_new("All Users:\n");
             g_tree_foreach(connections,AddToUserList,current_set);
 
             SSL_write(current_user->ssl,ListOfUsers->str, strlen(ListOfUsers->str));
             g_string_free(ListOfUsers,1);
         }
-        if(strncmp("/list", buf, 5) == 0){
+        else if(strncmp("/list", buf, 5) == 0){
+          buf[err] = "\0";
           ListOfChatrooms = g_string_new("All Chatrooms:\n");
           g_tree_foreach(chatrooms,AddToChatroomList,NULL);
 
           SSL_write(current_user->ssl,ListOfChatrooms->str,strlen(ListOfChatrooms->str));
           g_string_free(ListOfChatrooms,1);
+        }
+        else if(strncmp("/join",buf, 5) == 0){
+          int i = 5;
+          while (buf[i] != '\0' && isspace(buf[i])) { i++; }
+          char *chatroom = g_new0(char, strlen(buf) - 5);
+          strcpy(chatroom, buf+i);
+
+          joinRoom(chatroom, current_user);
+        }
+        else if(strncmp("/bye", buf, 4) == 0){
+          logConnection(current_user->ip_addr, current_user->port_addr,0);
+          g_tree_remove(connections, key);
+        }
+        else{
+          //meaning a message to your room 
+          GSList *users_in_room = g_tree_lookup(chatrooms,current_user->chatroom);
+          g_slist_foreach(users_in_room, sentToChatroom, buf);
+
         }
       }
       
@@ -157,17 +223,10 @@ int main(int argc, char **argv)
   SSL_load_error_strings();
 
   connections = g_tree_new(sockaddr_in_cmp);
-  chatrooms = g_tree_new(sockaddr_in_cmp);
+  chatrooms = g_tree_new((GCompareFunc)strcmp);
 
-  struct chatroom *new_chatroom = g_new0(struct chatroom, 1);
-              new_chatroom->name = "Public";
-
-  g_tree_insert(chatrooms,"Public",new_chatroom);
-
-  /*struct chatroom *new_chatroom2 = g_new0(struct chatroom, 1);
-              new_chatroom2->name = "TSAM";
-
-  g_tree_insert(chatrooms,"TSAM",new_chatroom2);*/
+  g_tree_insert(chatrooms,"Public",NULL);
+  g_tree_insert(chatrooms,"TSAM",NULL);
 
   meth = TLSv1_server_method();
   ssl_ctx = SSL_CTX_new(meth);
@@ -175,7 +234,6 @@ int main(int argc, char **argv)
   const char* certificate;
   certificate = "fd.crt";  
   if(SSL_CTX_use_certificate_file(ssl_ctx, certificate, SSL_FILETYPE_PEM) <= 0){
-      //ERR_print_errors(bio_err);
       printf("error loading certificate \n");
       exit(1);
   }
@@ -233,10 +291,6 @@ int main(int argc, char **argv)
           sock = accept(listen_sock, (struct sockaddr*)client, &len);
             /* Initialize OpenSSL */
           server_ssl = SSL_new(ssl_ctx);
-
-          /* Get current date */
-          time_t mytime;
-          time(&mytime);  
      
           char *ip_addr = inet_ntoa(client->sin_addr);
           int *port_addr = ntohs(client->sin_port);
@@ -249,13 +303,20 @@ int main(int argc, char **argv)
               printf("SSL connection failed\n");
             }
             else{
-              printf("%s : <%s>:<%d> connected\n",g_strstrip(ctime(&mytime)), ip_addr, port_addr);
+              logConnection(ip_addr,port_addr,1);
 
               /*construct a new user instance*/
               struct user *new_user = g_new0(struct user, 1);
               new_user->username = "Anonymous";
               new_user->fd = sock;
               new_user->ssl = server_ssl;
+              new_user->chatroom = "Public";
+              new_user->ip_addr = ip_addr;
+              new_user->port_addr = port_addr;
+
+              GSList *rooms = g_tree_lookup(chatrooms,"Public");
+              rooms = g_slist_prepend(rooms,new_user);
+              g_tree_insert(chatrooms,"Public",rooms);
 
               g_tree_insert(connections,client,new_user);
 

@@ -125,6 +125,7 @@ static char *chatroom;
  * input. It is good style to indicate the name of the user and the
  * chat room he is in as part of the prompt. */
 static char *prompt;
+int active = 1;
 
 
 
@@ -153,6 +154,8 @@ void readline_callback(char *line)
         add_history(line);
     }
     if ((strncmp("/bye", line, 4) == 0) || (strncmp("/quit", line, 5) == 0)) {
+        sendToServer("/bye");
+        active = 0;
         rl_callback_handler_remove();
         signal_handler(SIGTERM);
         return;
@@ -181,14 +184,19 @@ void readline_callback(char *line)
             rl_redisplay();
             return;
         }
-    char *chatroom = strdup(&(line[i]));
 
-                /* Process and send this information to the server. */
+        char *chatroom = strdup(&(line[i]));
+        sendToServer(line);
 
-                /* Maybe update the prompt. */
-    free(prompt);
-                prompt = NULL; /* What should the new prompt look like? */
-    rl_set_prompt(prompt);
+    /* Process and send this information to the server. */
+
+    /* Maybe update the prompt. */
+    //char *chatroomprompt;
+    //sprintf(chatroomprompt, "%s > ", chatroom);
+
+    //free(prompt);
+    //prompt = strdup(chatroomprompt); /* What should the new prompt look like? */
+    //rl_set_prompt(prompt);
     return;
 }
 if (strncmp("/list", line, 5) == 0) {
@@ -198,16 +206,7 @@ if (strncmp("/list", line, 5) == 0) {
 }
 if (strncmp("/roll", line, 5) == 0) {
                 /* roll dice and declare winner. */
-    int i = 5;
-    int j = i+1;
-    while(line[j] != '\0'){
-        j++;
-    }
-    char *message = strndup(&(line[i]), j - i);
-
-    //snprintf(buffer, 255, "%s\n", line);
-    //err = SSL_write(server_ssl, message, strlen(message));
-    sendToServer(message);
+    
     return;
 }
 if (strncmp("/say", line, 4) == 0) {
@@ -265,9 +264,9 @@ if (strncmp("/who", line, 4) == 0) {
     return;
 }
         /* Sent the buffer to the server. */
-snprintf(buffer, 255, "Message: %s\n", line);
-write(STDOUT_FILENO, buffer, strlen(buffer));
-fsync(STDOUT_FILENO);
+
+sendToServer(line);
+return;
 }
 
 int main(int argc, char **argv)
@@ -340,7 +339,7 @@ int main(int argc, char **argv)
     prompt = strdup("> ");
     rl_callback_handler_install(prompt, (rl_vcpfunc_t*) &readline_callback);
      
-    for(;;){        
+    while(active == 1){        
         fd_set rfds;
         struct timeval timeout;
 
