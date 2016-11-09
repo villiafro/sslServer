@@ -232,7 +232,7 @@ if (strncmp("/say", line, 4) == 0) {
     char *message = strndup(&(line[j]), j - i - 1);
 
                 /* Send private message to receiver. */
-
+    sendToServer(line);
     return;
 }
 if (strncmp("/user", line, 5) == 0) {
@@ -246,15 +246,16 @@ if (strncmp("/user", line, 5) == 0) {
         return;
     }
     char *new_user = strdup(&(line[i]));
-    char passwd[48];
-    getpasswd("Password: ", passwd, 48);
+    //char passwd[48];
+    //getpasswd("Password: ", passwd, 48);
 
                 /* Process and send this information to the server. */
 
                 /* Maybe update the prompt. */
-    free(prompt);
-                prompt = NULL; /* What should the new prompt look like? */
-    rl_set_prompt(prompt);
+    //free(prompt);
+    //prompt = NULL; /* What should the new prompt look like? */
+    //rl_set_prompt(prompt);
+    sendToServer(line);
     return;
 }
 if (strncmp("/who", line, 4) == 0) {

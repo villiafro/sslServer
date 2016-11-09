@@ -24,10 +24,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <dirent.h>
-
 #include <time.h>
-#include <glib.h>
-#include <glib/gprintf.h>
 
 struct user{
   char *username;
@@ -120,6 +117,14 @@ void joinRoom(char *roomName, gpointer userinfo){
   int err = SSL_write(current_user->ssl, "Welcome to room", 15);
 }
 
+void changeUserName(char *new_username, gpointer userinfo){
+  struct user* current_user = (struct user*)userinfo;
+
+  current_user->username = strdup(new_username);
+
+  int err = SSL_write(current_user->ssl, "Username changed", 16);
+}
+
 void sentToChatroom(gpointer key, gpointer data){
   char *message = data;
   struct user *recievingUser = (struct user *)key;
@@ -182,6 +187,29 @@ gboolean readData(gpointer key, gpointer value, gpointer data){
         else if(strncmp("/bye", buf, 4) == 0){
           logConnection(current_user->ip_addr, current_user->port_addr,0);
           g_tree_remove(connections, key);
+        }
+        else if(strncmp("/say", buf, 4) == 0){
+          int i = 4;
+          while (buf[i] != '\0' && isspace(buf[i])) { i++; }
+
+          int j = i+1;
+          while (buf[j] != '\0' && isgraph(buf[j])) { j++; }
+
+          //char *receiver = strndup(&(line[i]), j - i - 1);
+          //char *message = strndup(&(line[j]), j - i - 1);
+
+          //char *receiver = g_new0(char, strlen(buf) - 4);
+          //strcpy(receiver, buf+i);
+
+          //sendPM();
+        }
+        else if(strncmp("/user", buf, 5) == 0){
+          int i = 5;
+          while (buf[i] != '\0' && isspace(buf[i])) { i++; }
+          char *user = g_new0(char, strlen(buf) - 5);
+          strcpy(user, buf+i);
+
+          changeUserName(user, current_user);
         }
         else{
           //meaning a message to your room 
