@@ -109,6 +109,7 @@ static void initialize_exitfd(void)
  */
 static int server_fd;
 static SSL *server_ssl;
+static struct sockaddr_in server_addr;
 
 /* This variable shall point to the name of the user. The initial value
    is NULL. Set this variable to the username once the user managed to be
@@ -132,6 +133,11 @@ static char *prompt;
    handle the user requests in this function. The client handles the
    server messages in the loop in main(). */
 
+void sendToServer(char *message){
+    int server_message = SSL_write(server_ssl, message, strlen(message));
+    if(server_message == -1) { printf("Error sending message to server\n"); }
+}
+
 void readline_callback(char *line)
 {
     int err;
@@ -146,36 +152,35 @@ void readline_callback(char *line)
     if (strlen(line) > 0) {
         add_history(line);
     }
-    if ((strncmp("/bye", line, 4) == 0) ||
-        (strncmp("/quit", line, 5) == 0)) {
+    if ((strncmp("/bye", line, 4) == 0) || (strncmp("/quit", line, 5) == 0)) {
         rl_callback_handler_remove();
-    signal_handler(SIGTERM);
-    return;
-}
-if (strncmp("/game", line, 5) == 0) {
-                /* Skip whitespace */
-    int i = 4;
-    while (line[i] != '\0' && isspace(line[i])) { i++; }
-    if (line[i] == '\0') {
-        write(STDOUT_FILENO, "Usage: /game username\n",
-          29);
-        fsync(STDOUT_FILENO);
-        rl_redisplay();
+        signal_handler(SIGTERM);
         return;
     }
-                /* Start game */
-    return;
-}
-if (strncmp("/join", line, 5) == 0) {
-    int i = 5;
-                /* Skip whitespace */
-    while (line[i] != '\0' && isspace(line[i])) { i++; }
-    if (line[i] == '\0') {
-        write(STDOUT_FILENO, "Usage: /join chatroom\n", 22);
-        fsync(STDOUT_FILENO);
-        rl_redisplay();
+    if (strncmp("/game", line, 5) == 0) {
+                    /* Skip whitespace */
+        int i = 4;
+        while (line[i] != '\0' && isspace(line[i])) { i++; }
+        if (line[i] == '\0') {
+            write(STDOUT_FILENO, "Usage: /game username\n",
+              29);
+            fsync(STDOUT_FILENO);
+            rl_redisplay();
+            return;
+        }
+                    /* Start game */
         return;
     }
+    if (strncmp("/join", line, 5) == 0) {
+        int i = 5;
+                    /* Skip whitespace */
+        while (line[i] != '\0' && isspace(line[i])) { i++; }
+        if (line[i] == '\0') {
+            write(STDOUT_FILENO, "Usage: /join chatroom\n", 22);
+            fsync(STDOUT_FILENO);
+            rl_redisplay();
+            return;
+        }
     char *chatroom = strdup(&(line[i]));
 
                 /* Process and send this information to the server. */
@@ -188,6 +193,7 @@ if (strncmp("/join", line, 5) == 0) {
 }
 if (strncmp("/list", line, 5) == 0) {
                 /* Query all available chat rooms */
+    sendToServer("/list");
     return;
 }
 if (strncmp("/roll", line, 5) == 0) {
@@ -198,8 +204,10 @@ if (strncmp("/roll", line, 5) == 0) {
         j++;
     }
     char *message = strndup(&(line[i]), j - i);
+
     //snprintf(buffer, 255, "%s\n", line);
-    err = SSL_write(server_ssl, message, strlen(message));
+    //err = SSL_write(server_ssl, message, strlen(message));
+    sendToServer(message);
     return;
 }
 if (strncmp("/say", line, 4) == 0) {
@@ -252,6 +260,8 @@ if (strncmp("/user", line, 5) == 0) {
 }
 if (strncmp("/who", line, 4) == 0) {
                 /* Query all available users */
+    sendToServer("/who");
+
     return;
 }
         /* Sent the buffer to the server. */
@@ -270,7 +280,7 @@ int main(int argc, char **argv)
     SSL_METHOD *meth;
     SSL_CTX *ssl_ctx;
     int err,sock;
-    struct sockaddr_in server_addr;
+    
     const char *s_ipaddr = "127.0.0.1";
     const int server_port = strtol(argv[1], NULL, 10);
     char buf [4096];
@@ -278,6 +288,10 @@ int main(int argc, char **argv)
     
     meth = TLSv1_client_method();
     ssl_ctx = SSL_CTX_new(meth);
+
+    if(ssl_ctx == NULL){
+        printf("couldnt initalize ssl_cts\n");
+    }
 
     const char* certificate;
     certificate = "clientkey.crt";
@@ -294,20 +308,32 @@ int main(int argc, char **argv)
     }
 
     sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if(sock == -1){
+        printf("sock error\n");
+    }
 
     memset (&server_addr, '\0', sizeof(server_addr));
     server_addr.sin_family      = AF_INET;
     server_addr.sin_port        = htons(server_port); /* Server Port number */
     server_addr.sin_addr.s_addr = inet_addr(s_ipaddr); 
 
+    /* TCP/IP Connection */
     err = connect(sock, (struct sockaddr*) &server_addr, sizeof(server_addr));
+
+    if(err == -1){
+        printf("failed to create TCP/IP connection \n");
+    }
 
     /* Use the socket for the SSL connection. */
     server_ssl = SSL_new(ssl_ctx);
+    if(server_ssl == NULL){
+        printf("server_ssl is NULL\n");
+    }
+
     SSL_set_fd(server_ssl, sock);
 
-    err = SSL_connect(server_ssl);
-    if(err != 1){
+    int handshake = SSL_connect(server_ssl);
+    if(handshake == -1){
         printf("error connecting on SSL \n");
     }
 
@@ -325,7 +351,7 @@ int main(int argc, char **argv)
         FD_SET(STDIN_FILENO, &rfds);
         FD_SET(exitfd[0], &rfds);
         FD_SET(sock,&rfds);
-        timeout.tv_sec = 10;
+        timeout.tv_sec = 5;
         timeout.tv_usec = 0;
 
         //int r = select(exitfd[0] + 1, &rfds, NULL, NULL, &timeout);
@@ -341,21 +367,21 @@ int main(int argc, char **argv)
             perror("select()");
             break;
         }
-        if (r == 0) {
+        /*if (r == 0) {
             write(STDOUT_FILENO, "No message?\n", 12);
             fsync(STDOUT_FILENO);
-                            /* Whenever you print out a message, call this
-                               to reprint the current input line. */
+                            // Whenever you print out a message, call this
+                               to reprint the current input line. 
             rl_redisplay();
             continue;
         }
         if (FD_ISSET(exitfd[0], &rfds)) {
             printf ("revieved a signal \n");
-                            /* We received a signal. */
+                            // We received a signal.
             int signum;
             for (;;) {
                 if (read(exitfd[0], &signum, sizeof(signum)) == -1) {
-                    if (errno = EAGAIN) {
+                    if (errno == EAGAIN) {
                         printf ("error EAGAIN \n");
                         break;
                     } else {
@@ -366,13 +392,13 @@ int main(int argc, char **argv)
 
             }
             if (signum == SIGINT) {
-                                    /* Don't do anything. */
+                                    // Don't do anything.
             } else if (signum == SIGTERM) {
-                                    /* Clean-up and exit. */
+                                    // Clean-up and exit. 
                 break;
             }
 
-        }
+        }*/
         if (FD_ISSET(STDIN_FILENO, &rfds)) {
             rl_callback_read_char();            
         }
@@ -381,6 +407,7 @@ int main(int argc, char **argv)
 
             if(message_worked == -1) {
                 printf("Error reading form server\n");
+                break;
             }
 
             if(message_worked == 0) {
